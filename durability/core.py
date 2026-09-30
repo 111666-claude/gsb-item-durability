@@ -1,7 +1,4 @@
-"""装备耐久：损耗累积、破损禁用、按实际损耗收修理费。
-
-缺陷：每次使用都把损耗重置、破损之后还能用、修理费按满耐久算、耐久会扣成负数、查询全表扫描。
-"""
+"""装备耐久：损耗累积、破损禁用、按实际损耗收修理费。"""
 
 
 class ItemError(ValueError):
@@ -12,6 +9,8 @@ class Item:
     """一件装备。"""
 
     def __init__(self, item_id, max_durability):
+        if max_durability <= 0:
+            raise ItemError("耐久上限必须为正：%r" % max_durability)
         self.item_id = item_id
         self.max_durability = max_durability
         self.durability = max_durability
@@ -29,30 +28,38 @@ class Gear:
         self.items[item.item_id] = item
 
     def use(self, item_id, wear):
-        """使用一次。缺陷：把耐久重置成 max 减 wear（损耗不累积），破损后也返回 True。"""
+        """使用一次：耐久累加损耗，下限为 0；破损（耐久为 0）时返回 False。"""
         item = self.items.get(item_id)
         if item is None:
             raise ItemError("没有这件装备：%s" % item_id)
-        item.durability = item.max_durability - wear
-        return True
+        if wear < 0:
+            raise ItemError("损耗不能为负：%r" % wear)
+        if item.durability <= 0:
+            return False
+        item.durability = max(0, item.durability - wear)
+        return item.durability > 0
 
     def usable(self, item_id):
-        """缺陷：只看装备在不在，不看耐久。"""
-        self.scanned += len(self.items)
-        return item_id in self.items
+        """是否可用：只在耐久大于 0 时为真，单次查询 O(1)。"""
+        self.scanned += 1
+        item = self.items.get(item_id)
+        return item is not None and item.durability > 0
 
     def repair_cost(self, item_id):
-        """修理费。缺陷：按满耐久算，与实际损耗无关。"""
+        """修理费：只按实际损耗收费。"""
         item = self.items.get(item_id)
         if item is None:
             raise ItemError("没有这件装备：%s" % item_id)
-        return item.max_durability * self.price_per_point
+        return (item.max_durability - item.durability) * self.price_per_point
 
     def repair(self, item_id, gold):
-        """修理。缺陷：不看金币够不够，也不按实际损耗收费。"""
+        """修理：金币不足时返回 False 且耐久不变；够则扣费回满，返回 True。"""
         cost = self.repair_cost(item_id)
-        self.items[item_id].durability = self.items[item_id].max_durability
-        return gold - cost
+        if gold < cost:
+            return False
+        item = self.items[item_id]
+        item.durability = item.max_durability
+        return True
 
     def scanned_count(self):
         return self.scanned
